@@ -1,0 +1,9 @@
+import { neon } from "@neondatabase/serverless";
+import { NextResponse } from "next/server";
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+const KEY = "main";
+function db() { const url = process.env.DATABASE_URL || process.env.POSTGRES_URL; if (!url) throw new Error("DATABASE_URL ontbreekt in de Vercel-omgeving."); return neon(url); }
+async function ensureTable() { const sql = db(); await sql`CREATE TABLE IF NOT EXISTS public.elsa_app_state (id text PRIMARY KEY, state jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())`; return sql; }
+export async function GET() { try { const sql = await ensureTable(); const rows = await sql`SELECT state, updated_at FROM public.elsa_app_state WHERE id = ${KEY} LIMIT 1`; return NextResponse.json({ state: rows[0]?.state ?? null, updatedAt: rows[0]?.updated_at ?? null }); } catch (e) { console.error("Elsa state GET failed", e); return NextResponse.json({ error: "De checklist kon niet worden geladen." }, { status: 500 }); } }
+export async function POST(request: Request) { try { const body = await request.json(); if (!body || typeof body.state !== "object" || body.state === null || typeof body.state.date !== "string" || !Array.isArray(body.state.checked) || typeof body.state.history !== "object" || body.state.history === null) return NextResponse.json({ error: "Ongeldige checklistgegevens." }, { status: 400 }); const sql = await ensureTable(); const state = JSON.stringify(body.state); await sql`INSERT INTO public.elsa_app_state (id, state, updated_at) VALUES (${KEY}, ${state}::jsonb, now()) ON CONFLICT (id) DO UPDATE SET state = EXCLUDED.state, updated_at = now()`; return NextResponse.json({ ok: true, updatedAt: new Date().toISOString() }); } catch (e) { console.error("Elsa state POST failed", e); return NextResponse.json({ error: "Opslaan is niet gelukt. Controleer de internetverbinding." }, { status: 500 }); } }
